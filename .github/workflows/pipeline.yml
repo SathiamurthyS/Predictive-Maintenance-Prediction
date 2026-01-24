@@ -11,58 +11,113 @@ jobs:
   register-dataset:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: python -m pip install --upgrade --force-reinstall -r predictive_maintenance/requirements.txt
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r predictive_maintenance/requirements.txt
 
       - name: Upload Dataset to Hugging Face Hub
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python predictive_maintenance/model_building/data_register.py
 
+
   data-prep:
     needs: register-dataset
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: python -m pip install --upgrade --force-reinstall -r predictive_maintenance/requirements.txt
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r predictive_maintenance/requirements.txt
 
       - name: Run Data Preparation
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: python predictive_maintenance/model_building/prep.py
 
+
   model-training:
     needs: data-prep
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: python -m pip install --upgrade --force-reinstall -r predictive_maintenance/requirements.txt
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r predictive_maintenance/requirements.txt
 
       - name: Start MLflow Server
         run: |
           nohup mlflow ui --host 0.0.0.0 --port 5000 &
           sleep 5
 
-      - name: Model Building
+      - name: Model Training
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
         run: python predictive_maintenance/model_building/train.py
 
+
   deploy-hosting:
-    needs: [model-training, data-prep, register-dataset]
+    needs: [register-dataset, data-prep, model-training]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      - name: Install Dependencies
-        run: python -m pip install --upgrade --force-reinstall -r predictive_maintenance/requirements.txt
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r predictive_maintenance/requirements.txt
 
       - name: Push files to Frontend & Backend Hugging Face Spaces
         env:
