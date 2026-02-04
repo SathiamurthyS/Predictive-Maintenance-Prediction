@@ -28,7 +28,7 @@ if not HF_TOKEN:
 # Load Model
 # -------------------------------------------------------------------
 REPO_ID = "samdurai102024/predictive-maintenance-be"
-FILENAME = "best_predictive_maintenance_prediction_v1.joblib"
+FILENAME = "production/model.joblib"
 
 logger.info("Downloading model from Hugging Face Hub...")
 model_path = hf_hub_download(
