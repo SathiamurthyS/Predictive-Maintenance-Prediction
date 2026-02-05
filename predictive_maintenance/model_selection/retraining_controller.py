@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
 import json
+from datetime import datetime
 
 from huggingface_hub import hf_hub_download
 from sklearn.metrics import recall_score
@@ -77,6 +78,20 @@ def load_production_model():
         repo_type="model"
     )
     return joblib.load(local_path)
+
+# ============================================================
+# Load Champion Model (ADDED – REQUIRED FIX)
+# ============================================================
+
+def load_champion_model():
+    champion_path = BASE_DIR / "champion.model"
+
+    if not champion_path.exists():
+        raise RuntimeError(
+            "champion.model not found. Model selection may have failed."
+        )
+
+    return joblib.load(champion_path)
 
 # ============================================================
 # Compute Validation Recall from CURRENT Production Model
@@ -149,6 +164,18 @@ if __name__ == "__main__":
         run_full_retraining()
     else:
         print("\n No retraining required — model is healthy")
+
+# ============================================================
+# Load Champion & Generate Summary (FIXED)
+# ============================================================
+
+champion = load_champion_model()
+
+best_model_name = champion.get("model_name")
+
+if best_model_name is None:
+    raise RuntimeError("Champion model loaded but 'model_name' is missing")
+
 retraining_summary = {
     "pipeline": "Predictive Maintenance",
     "trigger_reason": "performance_drop",
@@ -163,3 +190,4 @@ with open("retraining_summary.json", "w") as f:
     json.dump(retraining_summary, f, indent=2)
 
 print("Retraining summary artifact generated")
+
