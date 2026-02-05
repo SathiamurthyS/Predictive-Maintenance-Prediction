@@ -1,8 +1,17 @@
 
 # ===============================
-# Imports
+# Path setup (single, correct)
 # ===============================
 import os
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# ===============================
+# Imports
+# ===============================
 import time
 import subprocess
 import joblib
@@ -23,11 +32,10 @@ from sklearn.metrics import (
     precision_score,
     f1_score,
     accuracy_score,
-    classification_report,
     make_scorer
 )
 
-from prep import build_preprocessor
+from predictive_maintenance.model_building.prep import build_preprocessor
 
 # ===============================
 # Constants
@@ -36,11 +44,21 @@ RANDOM_STATE = 42
 EXPERIMENT_NAME = "Predictive_Maintenance_RF_GridSearch"
 MLFLOW_LOCAL_URI = "file:./mlruns"
 NGROK_PORT = 5000
+REPO_ID = "samdurai102024/predictive-maintenance-be"
 
 # ===============================
-# MLflow + Ngrok Setup
+# MLflow + Ngrok Configuration
 # ===============================
-def start_mlflow_server():
+def configure_mlflow():
+    is_ci = bool(os.getenv("CI")) or bool(os.getenv("AUTO_RETRAIN"))
+
+    if is_ci:
+        mlflow.set_tracking_uri(MLFLOW_LOCAL_URI)
+        mlflow.set_experiment(EXPERIMENT_NAME)
+        print("Running in non-interactive mode (CI / Auto Retrain)")
+        return
+
+    # Start MLflow server
     subprocess.Popen(
         [
             "mlflow", "server",
@@ -54,16 +72,7 @@ def start_mlflow_server():
     )
     time.sleep(5)
 
-def configure_mlflow():
-    is_ci = bool(os.getenv("CI"))
-
-    if is_ci:
-        mlflow.set_tracking_uri(MLFLOW_LOCAL_URI)
-        mlflow.set_experiment(EXPERIMENT_NAME)
-        return
-
-    start_mlflow_server()
-
+    # Ask for token interactively if not present
     ngrok_token = os.getenv("NGROK_TOKEN") or getpass("Enter NGROK token: ")
     ngrok.set_auth_token(ngrok_token)
 
@@ -83,20 +92,22 @@ configure_mlflow()
 # ===============================
 # Load Data
 # ===============================
-def load_csv(repo_id, filename):
+def load_csv(filename):
     return pd.read_csv(
-        hf_hub_download(repo_id=repo_id, filename=filename, repo_type="dataset")
+        hf_hub_download(
+            repo_id=REPO_ID,
+            filename=filename,
+            repo_type="dataset"
+        )
     )
 
-REPO_ID = "samdurai102024/predictive-maintenance-be"
+X_train = load_csv("X_train.csv")
+X_val   = load_csv("X_val.csv")
+X_test  = load_csv("X_test.csv")
 
-X_train = load_csv(REPO_ID, "X_train.csv")
-X_val   = load_csv(REPO_ID, "X_val.csv")
-X_test  = load_csv(REPO_ID, "X_test.csv")
-
-y_train = load_csv(REPO_ID, "y_train.csv").squeeze().astype(int)
-y_val   = load_csv(REPO_ID, "y_val.csv").squeeze().astype(int)
-y_test  = load_csv(REPO_ID, "y_test.csv").squeeze().astype(int)
+y_train = load_csv("y_train.csv").squeeze().astype(int)
+y_val   = load_csv("y_val.csv").squeeze().astype(int)
+y_test  = load_csv("y_test.csv").squeeze().astype(int)
 
 # ===============================
 # Preprocessor
@@ -110,15 +121,17 @@ preprocessor = build_preprocessor(
 # ===============================
 # Model + Pipeline
 # ===============================
-rf = RandomForestClassifier(
+rf_model = RandomForestClassifier(
     random_state=RANDOM_STATE,
     n_jobs=-1
 )
 
-pipeline = Pipeline([
-    ("preprocessor", preprocessor),
-    ("classifier", rf)
-])
+rf_pipeline = Pipeline(
+    steps=[
+        ("preprocessor", preprocessor),
+        ("classifier", rf_model),
+    ]
+)
 
 # ===============================
 # Grid Search
@@ -132,33 +145,32 @@ param_grid = {
     "classifier__class_weight": [{0: 0.63, 1: 0.37}],
 }
 
-scorer = make_scorer(recall_score, pos_label=1)
+scorer = make_scorer(recall_score, average="binary")
 
 # ===============================
-# MLflow Training
+# Training + MLflow logging
 # ===============================
 with mlflow.start_run(run_name="RF_GridSearch"):
 
     mlflow.set_tags({
         "model_family": "RandomForest",
         "tuning_method": "gridsearch",
-        "sampling": "none",
-        "primary_metric": "recall"
+        "primary_metric": "recall",
+        "automation_safe": True,
     })
 
     grid = GridSearchCV(
-        pipeline,
+        estimator=rf_pipeline,
         param_grid=param_grid,
         scoring=scorer,
         cv=5,
         n_jobs=-1,
-        verbose=1
+        verbose=1,
     )
 
     grid.fit(X_train, y_train)
 
     mlflow.log_params(grid.best_params_)
-
     best_model = grid.best_estimator_
 
     def log_metrics(split, X, y):
@@ -172,25 +184,26 @@ with mlflow.start_run(run_name="RF_GridSearch"):
     log_metrics("val", X_val, y_val)
     log_metrics("test", X_test, y_test)
 
-    # Save model
     model_path = "rf_predictive_maintenance_v1.joblib"
     joblib.dump(best_model, model_path)
     mlflow.log_artifact(model_path, artifact_path="model")
 
 # ===============================
-# Upload to Hugging Face
+# Upload model to Hugging Face
 # ===============================
 api = HfApi()
-MODEL_REPO = "samdurai102024/predictive-maintenance-be"
 
 try:
-    api.repo_info(repo_id=MODEL_REPO, repo_type="model")
+    api.repo_info(repo_id=REPO_ID, repo_type="model")
 except RepositoryNotFoundError:
-    create_repo(repo_id=MODEL_REPO, repo_type="model", private=False)
+    create_repo(repo_id=REPO_ID, repo_type="model", private=False)
 
 api.upload_file(
     path_or_fileobj=model_path,
     path_in_repo=model_path,
-    repo_id=MODEL_REPO,
-    repo_type="model"
+    repo_id=REPO_ID,
+    repo_type="model",
+    commit_message="RF retraining artifact",
 )
+
+print("RF training completed successfully.")
