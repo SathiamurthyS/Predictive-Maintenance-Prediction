@@ -63,8 +63,38 @@ jobs:
         run: python predictive_maintenance/model_building/prep.py
 
 
-  model-training:
+  retraining-decision:
     needs: data-prep
+    runs-on: ubuntu-latest
+    outputs:
+      retrain_required: ${{ steps.check.outputs.retrain_required }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r predictive_maintenance/requirements.txt
+
+      - name: Run Retraining Controller
+        id: check
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          AUTO_RETRAIN: "true"
+        run: |
+          python predictive_maintenance/model_selection/retraining_controller.py
+          echo "retrain_required=true" >> $GITHUB_OUTPUT
+
+
+  model-training:
+    needs: retraining-decision
+    if: needs.retraining-decision.outputs.retrain_required == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -75,26 +105,28 @@ jobs:
         with:
           python-version: "3.10"
 
-      - name: Configure git
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r predictive_maintenance/requirements.txt
 
-      - name: Start MLflow Server
-        run: |
-          nohup mlflow ui --host 0.0.0.0 --port 5000 &
-          sleep 5
-
-      - name: Model Training
+      - name: Train Random Forest
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-          NGROK_TOKEN: ${{ secrets.NGROK_TOKEN }}
-        run: python predictive_maintenance/model_building/train.py
+          AUTO_RETRAIN: "true"
+        run: python predictive_maintenance/model_building/train_rf.py
+
+      - name: Train Gradient Boosting
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          AUTO_RETRAIN: "true"
+        run: python predictive_maintenance/model_building/train_gbm.py
+
+      - name: Train XGBoost
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          AUTO_RETRAIN: "true"
+        run: python predictive_maintenance/model_building/train_xgb.py
 
 
   deploy-hosting:
