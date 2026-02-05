@@ -1,7 +1,12 @@
 
 import mlflow
+import mlflow.sklearn
 import pandas as pd
 import numpy as np
+import joblib
+
+from pathlib import Path
+from datetime import datetime
 from mlflow.tracking import MlflowClient
 from sklearn.metrics import recall_score, precision_score, f1_score
 
@@ -26,9 +31,6 @@ client = MlflowClient()
 # STEP 1: CROSS-EXPERIMENT COMPARISON
 # ===============================
 def fetch_best_runs():
-    """
-    Fetch the best run (by PRIMARY_METRIC) from each experiment.
-    """
     records = []
 
     for algo, exp_name in EXPERIMENTS.items():
@@ -68,9 +70,6 @@ def fetch_best_runs():
 # STEP 2: MODEL REGISTRY PROMOTION
 # ===============================
 def register_and_promote(df):
-    """
-    Registers champion and challenger models into MLflow Model Registry.
-    """
     champion = df.iloc[0]
     challenger = df.iloc[1] if len(df) > 1 else None
 
@@ -80,7 +79,6 @@ def register_and_promote(df):
             name=MODEL_NAME
         )
 
-        # Attach metadata for traceability
         client.set_model_version_tag(
             name=MODEL_NAME,
             version=mv.version,
@@ -109,10 +107,6 @@ def register_and_promote(df):
 # STEP 3: THRESHOLD OPTIMIZATION
 # ===============================
 def tune_threshold(model, X_val, y_val):
-    """
-    Finds the optimal decision threshold satisfying MIN_RECALL
-    while maximizing precision.
-    """
     probs = model.predict_proba(X_val)[:, 1]
     thresholds = np.arange(0.1, 0.9, 0.05)
 
@@ -139,31 +133,15 @@ def tune_threshold(model, X_val, y_val):
     ).iloc[0]
 
 # ===============================
-# ORCHESTRATOR (CALLED FROM train.py)
+# ORCHESTRATOR
 # ===============================
 def run_model_selection(best_model, X_val, y_val):
-    """
-    Authoritative decision engine.
-
-    Responsibilities:
-    - Cross-experiment comparison
-    - Champion / challenger selection
-    - Model registry promotion
-    - Threshold optimization
-
-    train.py:
-    - trains models
-    - loads data
-    - executes final deployment logic
-    """
 
     with mlflow.start_run(run_name="Model_Selection"):
 
-        #Compare candidate models
         comparison_df = fetch_best_runs()
         mlflow.log_table(comparison_df, "model_comparison.csv")
 
-        #Register & promote
         champion, challenger, champ_ver, chall_ver = register_and_promote(
             comparison_df
         )
@@ -178,7 +156,6 @@ def run_model_selection(best_model, X_val, y_val):
             mlflow.log_metric("challenger_val_recall", challenger.val_recall)
             mlflow.log_param("challenger_model_version", chall_ver)
 
-        #Threshold tuning (champion only)
         threshold = tune_threshold(best_model, X_val, y_val)
 
         mlflow.log_param("decision_threshold", threshold.threshold)
@@ -190,9 +167,35 @@ def run_model_selection(best_model, X_val, y_val):
         print(f" Champion: {champion.model}")
         print(f" Optimal Threshold: {threshold.threshold}")
 
+        # ====================================================
+        # Persist Champion Model (CI / Retraining dependency)
+        # ====================================================
+        champion_model = mlflow.sklearn.load_model(champion.model_uri)
+
+        BASE_DIR = Path(__file__).resolve().parent
+        CHAMPION_PATH = BASE_DIR / "champion.model"
+
+        champion_payload = {
+            "model_name": champion.model,
+            "model": champion_model,
+            "metrics": {
+                "val_recall": float(champion.val_recall),
+                "val_precision": float(champion.val_precision),
+                "val_f1": float(champion.val_f1),
+                "val_accuracy": float(champion.val_accuracy),
+            },
+            "decision_threshold": float(threshold.threshold),
+            "run_id": champion.run_id,
+            "saved_at_utc": datetime.utcnow().isoformat()
+        }
+
+        joblib.dump(champion_payload, CHAMPION_PATH)
+        print(f" Champion artifact saved: {CHAMPION_PATH}")
+
     return {
         "champion_algo": champion.model,
         "champion_run_id": champion.run_id,
         "model_uri": champion.model_uri,
         "decision_threshold": threshold.threshold
     }
+
