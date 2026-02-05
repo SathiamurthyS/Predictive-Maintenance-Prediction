@@ -148,3 +148,17 @@ if __name__ == "__main__":
         run_full_retraining()
     else:
         print("\n No retraining required — model is healthy")
+retraining_summary = {
+    "pipeline": "Predictive Maintenance",
+    "trigger_reason": "performance_drop",
+    "validation_recall": float(val_recall),
+    "threshold": float(threshold),
+    "retrained_models": ["RandomForest", "GradientBoosting", "XGBoost"],
+    "best_model": best_model_name,
+    "timestamp_utc": datetime.utcnow().isoformat()
+}
+
+with open("retraining_summary.json", "w") as f:
+    json.dump(retraining_summary, f, indent=2)
+
+print("Retraining summary artifact generated")
