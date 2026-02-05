@@ -1,10 +1,7 @@
-
 import mlflow
-import mlflow.sklearn
 import pandas as pd
 import numpy as np
 import joblib
-
 from pathlib import Path
 from datetime import datetime
 from mlflow.tracking import MlflowClient
@@ -133,7 +130,7 @@ def tune_threshold(model, X_val, y_val):
     ).iloc[0]
 
 # ===============================
-# ORCHESTRATOR
+# ORCHESTRATOR (CALLED FROM train.py OR CI)
 # ===============================
 def run_model_selection(best_model, X_val, y_val):
 
@@ -147,14 +144,14 @@ def run_model_selection(best_model, X_val, y_val):
         )
 
         mlflow.log_param("champion_model", champion.model)
-        mlflow.log_metric("champion_val_recall", champion.val_recall)
         mlflow.log_param("champion_run_id", champion.run_id)
         mlflow.log_param("champion_model_version", champ_ver)
+        mlflow.log_metric("champion_val_recall", champion.val_recall)
 
         if challenger is not None:
             mlflow.log_param("challenger_model", challenger.model)
-            mlflow.log_metric("challenger_val_recall", challenger.val_recall)
             mlflow.log_param("challenger_model_version", chall_ver)
+            mlflow.log_metric("challenger_val_recall", challenger.val_recall)
 
         threshold = tune_threshold(best_model, X_val, y_val)
 
@@ -163,19 +160,18 @@ def run_model_selection(best_model, X_val, y_val):
         mlflow.log_metric("threshold_precision", threshold.precision)
         mlflow.log_metric("threshold_f1", threshold.f1)
 
-        print(" Model Selection Completed")
         print(f" Champion: {champion.model}")
         print(f" Optimal Threshold: {threshold.threshold}")
 
         # ====================================================
-        # Persist Champion Model (CI / Retraining dependency)
+        # Persist Champion Model (CRITICAL FOR CI / RETRAINING)
         # ====================================================
         champion_model = mlflow.sklearn.load_model(champion.model_uri)
 
         BASE_DIR = Path(__file__).resolve().parent
         CHAMPION_PATH = BASE_DIR / "champion.model"
 
-        champion_payload = {
+        payload = {
             "model_name": champion.model,
             "model": champion_model,
             "metrics": {
@@ -189,13 +185,31 @@ def run_model_selection(best_model, X_val, y_val):
             "saved_at_utc": datetime.utcnow().isoformat()
         }
 
-        joblib.dump(champion_payload, CHAMPION_PATH)
+        joblib.dump(payload, CHAMPION_PATH)
         print(f" Champion artifact saved: {CHAMPION_PATH}")
 
-    return {
-        "champion_algo": champion.model,
-        "champion_run_id": champion.run_id,
-        "model_uri": champion.model_uri,
-        "decision_threshold": threshold.threshold
-    }
+    return payload
+
+# ===============================
+# SCRIPT ENTRYPOINT (CI EXECUTION)
+# ===============================
+if __name__ == "__main__":
+
+    print("\n▶ Selecting Best Model")
+
+    X_val = pd.read_csv("X_val.csv")
+    y_val = pd.read_csv("y_val.csv").squeeze().astype(int)
+
+    comparison_df = fetch_best_runs()
+    champion_row = comparison_df.iloc[0]
+
+    best_model = mlflow.sklearn.load_model(champion_row.model_uri)
+
+    run_model_selection(
+        best_model=best_model,
+        X_val=X_val,
+        y_val=y_val
+    )
+
+    print("▶ Model selection completed successfully")
 
