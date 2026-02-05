@@ -153,7 +153,7 @@ retraining_summary = {
     "pipeline": "Predictive Maintenance",
     "trigger_reason": "performance_drop",
     "validation_recall": float(val_recall),
-    "threshold": float(threshold),
+    "threshold": float(THRESHOLD),
     "retrained_models": ["RandomForest", "GradientBoosting", "XGBoost"],
     "best_model": best_model_name,
     "timestamp_utc": datetime.utcnow().isoformat()
