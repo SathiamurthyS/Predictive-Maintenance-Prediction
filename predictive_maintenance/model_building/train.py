@@ -1,16 +1,19 @@
+%%writefile predictive_maintenance/model_building/train.py
 
 # ===============================
 # Imports
 # ===============================
 import os
+import subprocess
 import joblib
 import numpy as np
 import pandas as pd
 import mlflow
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from datetime import timezone
 import json
+import time
+
 from mlflow.tracking import MlflowClient
 from huggingface_hub import hf_hub_download, HfApi
 
@@ -35,6 +38,7 @@ EXPERIMENT_NAME = "Predictive_Maintenance_Final_Training"
 MODEL_REGISTRY_NAME = "PredictiveMaintenanceModel"
 
 MLFLOW_LOCAL_URI = "file:./mlruns"
+MLFLOW_PORT = 5000
 
 HF_DATASET_REPO = "samdurai102024/predictive-maintenance-be"
 HF_MODEL_REPO   = "samdurai102024/predictive-maintenance-be"
@@ -42,6 +46,7 @@ HF_MODEL_REPO   = "samdurai102024/predictive-maintenance-be"
 THRESHOLD = 0.45
 DEFAULT_CHAMPION = "XGB"
 champion_metadata = None
+
 MODEL_ARTIFACTS = {
     "RF":  "rf_predictive_maintenance_v1.joblib",
     "GBM": "gbm_predictive_maintenance_v1.joblib",
@@ -52,10 +57,53 @@ PRODUCTION_MODEL_PATH = "production/model.joblib"
 ARCHIVE_PATH = "archive"
 
 # ===============================
-# MLflow Configuration (LOCAL ONLY)
+# MLflow Configuration
 # ===============================
 mlflow.set_tracking_uri(MLFLOW_LOCAL_URI)
 mlflow.set_experiment(EXPERIMENT_NAME)
+
+# ===============================
+# Start MLflow UI + ngrok (OPTIONAL)
+# ===============================
+def start_mlflow_with_ngrok():
+    """
+    Starts MLflow UI locally and exposes it via ngrok if token is available.
+    Safe for CI: skips ngrok if token not set.
+    """
+
+    print("Starting MLflow UI...")
+
+    subprocess.Popen(
+        [
+            "mlflow", "ui",
+            "--backend-store-uri", "./mlruns",
+            "--host", "0.0.0.0",
+            "--port", str(MLFLOW_PORT),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+
+    time.sleep(5)  # allow UI to start
+
+    ngrok_token = os.getenv("NGROK_AUTHTOKEN")
+    if not ngrok_token:
+        print("NGROK_AUTHTOKEN not set. MLflow UI available locally only.")
+        print(f"Local MLflow UI: http://localhost:{MLFLOW_PORT}")
+        return None
+
+    try:
+        from pyngrok import ngrok, conf
+        conf.get_default().auth_token = ngrok_token
+        public_url = ngrok.connect(MLFLOW_PORT, "http")
+        print(f"MLflow Tracking UI (public): {public_url}")
+        return str(public_url)
+    except Exception as e:
+        print(f"ngrok failed to start: {e}")
+        return None
+
+
+tracking_url = start_mlflow_with_ngrok()
 
 # ===============================
 # Resolve Champion Algorithm
@@ -76,7 +124,6 @@ def get_champion_algo(default=DEFAULT_CHAMPION):
             return default
 
         return versions[0].tags.get("model_family", default)
-
     except Exception:
         return default
 
@@ -111,13 +158,11 @@ print("Data loaded from Hugging Face")
 # ===============================
 def load_tuned_pipeline(algo):
     artifact_name = MODEL_ARTIFACTS[algo]
-
     local_path = hf_hub_download(
         repo_id=HF_MODEL_REPO,
         filename=artifact_name,
         repo_type="model"
     )
-
     print(f"Loaded tuned model artifact: {artifact_name}")
     return joblib.load(local_path)
 
@@ -143,7 +188,8 @@ with mlflow.start_run(run_name=f"Final_{champion_algo}_Training"):
     mlflow.set_tags({
         "model_family": champion_algo,
         "stage": "final_training",
-        "threshold": THRESHOLD
+        "threshold": THRESHOLD,
+        "mlflow_ui": tracking_url or "local"
     })
 
     pipeline.fit(X_train, y_train)
@@ -179,17 +225,13 @@ with mlflow.start_run(run_name=f"Final_{champion_algo}_Training"):
     )
 
 # ===============================
-# Push FINAL Model to Hugging Face (Automation Safe)
+# Push FINAL Model to Hugging Face
 # ===============================
 api = HfApi()
 timestamp = datetime.now().strftime("%Y_%m_%d_%H%M")
 
-# ===============================
-# Push FINAL Model to Hugging Face
-# ===============================
 os.makedirs(ARCHIVE_PATH, exist_ok=True)
 
-# Archive champion
 archive_file = f"{ARCHIVE_PATH}/{champion_algo.lower()}_{timestamp}.joblib"
 joblib.dump(pipeline, archive_file)
 
@@ -201,7 +243,6 @@ api.upload_file(
     commit_message=f"Archive {champion_algo} model ({timestamp})"
 )
 
-# Promote to production (stable alias)
 joblib.dump(pipeline, "model.joblib")
 
 api.upload_file(
@@ -212,32 +253,24 @@ api.upload_file(
     commit_message=f"Promote {champion_algo} to production"
 )
 
-def write_final_model_info(champion_metadata: dict | None = None):
-    """
-    Always writes final_model_info.txt to REPO ROOT for CI artifact upload.
-    """
-
+# ===============================
+# Always write final_model_info.txt
+# ===============================
+def write_final_model_info(champion_metadata=None):
     repo_root = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
     output_path = repo_root / "final_model_info.txt"
 
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "SUCCESS",
-        "champion_model": champion_algo
+        "champion_model": champion_algo,
+        "mlflow_tracking_url": tracking_url or "local"
     }
 
-    if champion_metadata:
-        payload.update({
-            "run_id": champion_metadata.get("run_id", "UNKNOWN"),
-            "metrics": champion_metadata.get("metrics", {})
-        })
-    else:
-        payload["note"] = "Fallback artifact created"
-
     output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    print(f" final_model_info.txt written at {output_path.resolve()}")
-try:
-    champion_metadata = run_model_selection()
-finally:
-    write_final_model_info(champion_metadata)
+    print(f"final_model_info.txt written at {output_path.resolve()}")
+
+write_final_model_info()
+
 print("Final production model promoted to Hugging Face successfully.")
+
