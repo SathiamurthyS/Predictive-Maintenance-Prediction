@@ -1,4 +1,3 @@
-%%writefile predictive_maintenance/model_building/train.py
 
 # ===============================
 # Imports
