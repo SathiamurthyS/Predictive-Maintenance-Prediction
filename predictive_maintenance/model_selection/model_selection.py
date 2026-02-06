@@ -68,7 +68,7 @@ def fetch_best_runs() -> pd.DataFrame:
 # ORCHESTRATOR
 # ===============================
 def run_model_selection():
-
+    from huggingface_hub import HfApi
     with mlflow.start_run(run_name="Model_Selection"):
 
         comparison_df = fetch_best_runs()
@@ -112,6 +112,23 @@ def run_model_selection():
 
         joblib.dump(payload, champion_path)
         print(f" Champion metadata saved at: {champion_path}")
+
+       
+        HF_MODEL_REPO = "samdurai102024/predictive-maintenance-be"
+        HF_CHAMPION_PATH = "production/champion.model"
+        
+        api = HfApi()
+        
+        api.upload_file(
+            path_or_fileobj=champion_path,
+            path_in_repo=HF_CHAMPION_PATH,
+            repo_id=HF_MODEL_REPO,
+            repo_type="model",
+            commit_message="Update champion model metadata"
+        )
+
+        print(" Champion metadata uploaded to Hugging Face")
+
 
     return payload
 
