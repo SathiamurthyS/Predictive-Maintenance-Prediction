@@ -108,7 +108,7 @@ if st.button("Predict", type="primary"):
             st.dataframe(aligned_df)
 
         else:
-            st.error(f"⚠ API Error {response.status_code}")
+            st.error(f"API Error {response.status_code}")
             st.write(response.text)
 
     except requests.exceptions.RequestException as e:
