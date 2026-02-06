@@ -8,7 +8,9 @@ import numpy as np
 import pandas as pd
 import mlflow
 from datetime import datetime
-
+from pathlib import Path
+from datetime import timezone
+import json
 from mlflow.tracking import MlflowClient
 from huggingface_hub import hf_hub_download, HfApi
 
@@ -209,5 +211,37 @@ api.upload_file(
     repo_type="model",
     commit_message=f"Promote {champion_algo} to production"
 )
+
+def write_final_model_info(champion_metadata: dict | None = None):
+    """
+    Always writes final_model_info.txt for CI artifact upload.
+    Safe even if champion metadata is missing.
+    """
+
+    output_path = Path("final_model_info.txt")
+
+    base_payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "SUCCESS",
+    }
+
+    if champion_metadata:
+        base_payload.update({
+            "champion_model": champion_metadata.get("model_name", "UNKNOWN"),
+            "run_id": champion_metadata.get("run_id", "UNKNOWN"),
+            "val_recall": champion_metadata.get("metrics", {}).get("val_recall"),
+            "val_precision": champion_metadata.get("metrics", {}).get("val_precision"),
+            "val_f1": champion_metadata.get("metrics", {}).get("val_f1"),
+            "val_accuracy": champion_metadata.get("metrics", {}).get("val_accuracy"),
+        })
+    else:
+        base_payload["note"] = "Champion metadata unavailable; fallback file created"
+
+    output_path.write_text(
+        json.dumps(base_payload, indent=2),
+        encoding="utf-8"
+    )
+
+    print(f"final_model_info.txt written at {output_path.resolve()}")
 
 print("Final production model promoted to Hugging Face successfully.")
