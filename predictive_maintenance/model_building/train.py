@@ -41,7 +41,7 @@ HF_MODEL_REPO   = "samdurai102024/predictive-maintenance-be"
 
 THRESHOLD = 0.45
 DEFAULT_CHAMPION = "XGB"
-
+champion_metadata = None
 MODEL_ARTIFACTS = {
     "RF":  "rf_predictive_maintenance_v1.joblib",
     "GBM": "gbm_predictive_maintenance_v1.joblib",
@@ -227,7 +227,7 @@ def write_final_model_info(champion_metadata: dict | None = None):
 
     if champion_metadata:
         base_payload.update({
-            "champion_model": champion_metadata.get("model_name", "UNKNOWN"),
+            "champion_model": champion_metadata.get("model_name", champion_algo),
             "run_id": champion_metadata.get("run_id", "UNKNOWN"),
             "val_recall": champion_metadata.get("metrics", {}).get("val_recall"),
             "val_precision": champion_metadata.get("metrics", {}).get("val_precision"),
@@ -243,5 +243,8 @@ def write_final_model_info(champion_metadata: dict | None = None):
     )
 
     print(f"final_model_info.txt written at {output_path.resolve()}")
-
+try:
+    champion_metadata = run_model_selection()
+finally:
+    write_final_model_info(champion_metadata)
 print("Final production model promoted to Hugging Face successfully.")
