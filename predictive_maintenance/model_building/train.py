@@ -214,35 +214,28 @@ api.upload_file(
 
 def write_final_model_info(champion_metadata: dict | None = None):
     """
-    Always writes final_model_info.txt for CI artifact upload.
-    Safe even if champion metadata is missing.
+    Always writes final_model_info.txt to REPO ROOT for CI artifact upload.
     """
 
-    output_path = Path("final_model_info.txt")
+    repo_root = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
+    output_path = repo_root / "final_model_info.txt"
 
-    base_payload = {
+    payload = {
         "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "status": "SUCCESS",
+        "champion_model": champion_algo
     }
 
     if champion_metadata:
-        base_payload.update({
-            "champion_model": champion_metadata.get("model_name", champion_algo),
+        payload.update({
             "run_id": champion_metadata.get("run_id", "UNKNOWN"),
-            "val_recall": champion_metadata.get("metrics", {}).get("val_recall"),
-            "val_precision": champion_metadata.get("metrics", {}).get("val_precision"),
-            "val_f1": champion_metadata.get("metrics", {}).get("val_f1"),
-            "val_accuracy": champion_metadata.get("metrics", {}).get("val_accuracy"),
+            "metrics": champion_metadata.get("metrics", {})
         })
     else:
-        base_payload["note"] = "Champion metadata unavailable; fallback file created"
+        payload["note"] = "Fallback artifact created"
 
-    output_path.write_text(
-        json.dumps(base_payload, indent=2),
-        encoding="utf-8"
-    )
-
-    print(f"final_model_info.txt written at {output_path.resolve()}")
+    output_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    print(f" final_model_info.txt written at {output_path.resolve()}")
 try:
     champion_metadata = run_model_selection()
 finally:
