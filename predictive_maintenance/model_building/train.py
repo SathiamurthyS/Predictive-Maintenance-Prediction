@@ -1,4 +1,5 @@
 
+
 # ============================================================
 # Final Training / Registration Script (PERFORMANCE SAFE)
 # ============================================================
@@ -217,9 +218,15 @@ def write_final_model_info(metadata=None):
         alias="prod",
         version=latest.version
     )
+
 try:
     champion_metadata = run_model_selection()
 finally:
     write_final_model_info(champion_metadata)
+
+output_path = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd())) / "final_model_info.txt"
+# Log artifact explicitly after writing
+write_final_model_info(champion_metadata)
+mlflow.log_artifact(str(output_path))  # ensures MLflow knows where it is
 
 print("Final model registered and PROD alias promoted successfully.")
