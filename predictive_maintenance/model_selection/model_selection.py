@@ -5,6 +5,7 @@ import joblib
 from pathlib import Path
 from datetime import datetime, timezone
 from mlflow.tracking import MlflowClient
+from huggingface_hub import HfApi
 
 # ===============================
 # CONFIG
@@ -68,7 +69,7 @@ def fetch_best_runs() -> pd.DataFrame:
 # ORCHESTRATOR
 # ===============================
 def run_model_selection():
-    from huggingface_hub import HfApi
+
     with mlflow.start_run(run_name="Model_Selection"):
 
         comparison_df = fetch_best_runs()
@@ -111,14 +112,13 @@ def run_model_selection():
         }
 
         joblib.dump(payload, champion_path)
-        print(f" Champion metadata saved at: {champion_path}")
+        print(f"Champion metadata saved at: {champion_path}")
 
-       
         HF_MODEL_REPO = "samdurai102024/predictive-maintenance-be"
         HF_CHAMPION_PATH = "production/champion.model"
-        
+
         api = HfApi()
-        
+
         api.upload_file(
             path_or_fileobj=champion_path,
             path_in_repo=HF_CHAMPION_PATH,
@@ -130,6 +130,7 @@ def run_model_selection():
         print(" Champion metadata uploaded to Hugging Face")
 
 
+
     return payload
 
 # ===============================
@@ -137,13 +138,12 @@ def run_model_selection():
 # ===============================
 if __name__ == "__main__":
 
-    print("\n Running Model Selection")
+    print("\n▶ Running Model Selection")
 
     try:
         run_model_selection()
     except Exception as e:
         # ABSOLUTELY NEVER FAIL CI HERE
-        print(f"⚠️ Model selection failed gracefully: {e}")
+        print(f" Model selection failed gracefully: {e}")
 
-    print(" Model selection completed successfully")
-
+    print("▶ Model selection completed successfully")

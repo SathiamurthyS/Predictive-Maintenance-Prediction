@@ -156,6 +156,7 @@ param_grid = {
     "classifier__colsample_bytree": [0.4, 0.5],
     "classifier__reg_alpha": [0.2, 0.3],
     "classifier__reg_lambda": [4, 5],
+    "classifier__scale_pos_weight": [2],
 }
 
 scorer = make_scorer(recall_score, average="binary")
