@@ -65,7 +65,6 @@ jobs:
           python predictive_maintenance/model_selection/retraining_controller.py
           echo "retrain_required=true" >> $GITHUB_OUTPUT
 
-      # 🔹 STEP 3-B (Artifact upload)
       - name: Upload retraining summary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -113,11 +112,8 @@ jobs:
         with:
           name: final-model-info
           path: final_model_info.txt
-      - name: Upload model summary
-        uses: actions/upload-artifact@v4
-        with:
-          name: final-model-info
-          path: final_model_info.txt
+          if-no-files-found: ignore
+
 
   deploy-hosting:
     needs: [register-dataset, data-prep, model-training]
