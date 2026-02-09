@@ -1,5 +1,3 @@
-
-
 # ============================================================
 # Final Training / Registration Script (PERFORMANCE SAFE)
 # ============================================================
@@ -59,8 +57,6 @@ MODEL_ARTIFACTS = {
     "XGB": "xgb_predictive_maintenance_v1.joblib"
 }
 
-champion_metadata = None
-
 # ===============================
 # MLflow + Ngrok
 # ===============================
@@ -114,7 +110,29 @@ champion_algo = get_champion_algo()
 print(f"Champion Algorithm: {champion_algo}")
 
 # ===============================
-# Load RAW Data (NO preprocessing here)
+# Final model info writer
+# ===============================
+def write_final_model_info(metadata=None):
+
+    repo_root = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
+    output_path = repo_root / "final_model_info.txt"
+
+    payload = {
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "status": "SUCCESS",
+        "champion_model": champion_algo
+    }
+
+    if metadata and "metrics" in metadata:
+        payload["metrics"] = metadata["metrics"]
+
+    output_path.write_text(json.dumps(payload, indent=2))
+    print(f"final_model_info.txt written at {output_path}")
+
+    return output_path
+
+# ===============================
+# Load RAW Data (NO preprocessing)
 # ===============================
 def load_csv(filename):
     return pd.read_csv(
@@ -136,7 +154,7 @@ y_test  = load_csv("y_test.csv").squeeze().astype(int)
 print("Data loaded from Hugging Face")
 
 # ===============================
-# Load FITTED PIPELINE (preprocessor + model)
+# Load FITTED PIPELINE
 # ===============================
 def load_tuned_pipeline(algo):
     artifact = MODEL_ARTIFACTS[algo]
@@ -151,7 +169,7 @@ def load_tuned_pipeline(algo):
 pipeline = load_tuned_pipeline(champion_algo)
 
 # ===============================
-# Evaluation Helper (PIPELINE ONLY)
+# Evaluation Helper
 # ===============================
 def evaluate(split, X, y):
     probs = pipeline.predict_proba(X)[:, 1]
@@ -191,42 +209,23 @@ with mlflow.start_run(run_name=f"Final_{champion_algo}_Registration"):
         registered_model_name=MODEL_REGISTRY_NAME
     )
 
+    # Optional metadata (safe if read-only)
+    champion_metadata = run_model_selection() if not os.getenv("CI") else None
+
+    # Write + log artifact INSIDE run
+    output_path = write_final_model_info(champion_metadata)
+    mlflow.log_artifact(str(output_path))
+
 # ===============================
-# Promote PROD Alias
+# Promote PROD Alias (AFTER run)
 # ===============================
-def write_final_model_info(metadata=None):
+versions = client.get_latest_versions(MODEL_REGISTRY_NAME)
+latest = max(versions, key=lambda v: int(v.version))
 
-    repo_root = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd()))
-    output_path = repo_root / "final_model_info.txt"
-
-    payload = {
-        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
-        "status": "SUCCESS",
-        "champion_model": champion_algo
-    }
-
-    if metadata:
-        payload["metrics"] = metadata.get("metrics", {})
-
-    output_path.write_text(json.dumps(payload, indent=2))
-    print(f"final_model_info.txt written at {output_path}")
-
-    latest = client.get_latest_versions(MODEL_REGISTRY_NAME)[0]
-
-    client.set_registered_model_alias(
-        name=MODEL_REGISTRY_NAME,
-        alias="prod",
-        version=latest.version
-    )
-
-try:
-    champion_metadata = run_model_selection()
-finally:
-    write_final_model_info(champion_metadata)
-
-output_path = Path(os.environ.get("GITHUB_WORKSPACE", os.getcwd())) / "final_model_info.txt"
-# Log artifact explicitly after writing
-write_final_model_info(champion_metadata)
-mlflow.log_artifact(str(output_path))  # ensures MLflow knows where it is
+client.set_registered_model_alias(
+    name=MODEL_REGISTRY_NAME,
+    alias="prod",
+    version=latest.version
+)
 
 print("Final model registered and PROD alias promoted successfully.")
